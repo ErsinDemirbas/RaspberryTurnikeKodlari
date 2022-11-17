@@ -1,0 +1,215 @@
+import os
+import requests
+import sys, signal, os, time, datetime
+import socket
+import sqlite3
+import RPi.GPIO as GPIO
+GPIO.setmode(GPIO.BOARD)
+GPIO.setwarnings(False)
+GPIO.setup(12,GPIO.OUT)
+GPIO.output(12,GPIO.HIGH)
+GPIO.setup(15, GPIO.OUT)
+GPIO.output(15, GPIO.HIGH)
+#GPIO.setup(17, GPIO.OUT)
+#Buzzer.setup()
+#LED.setup()
+# Lock the door on boot
+#led = LED(15)
+
+def unlock_door_in(duration):
+
+        print "Misafir giris yaptii"
+        GPIO.output(15, GPIO.LOW)
+        time.sleep(duration)
+        print "Giris tamamlandi!"
+        GPIO.output(15, GPIO.HIGH)
+
+
+def unlock_door_out(duration):
+        print "Misafir cikis yapti"
+        GPIO.output(12, GPIO.LOW)
+        time.sleep(duration)
+        print "Cikis Tamamlandi"
+        GPIO.output(12, GPIO.HIGH)
+
+def send_request(code, cursor):
+    data2 = {"cardId":code,"companyId": 2060, "turntileId":1}
+        response = requests.post("https://pixpass.pixselect.com.tr:3434/api/v1//card_id_control", data=data2)
+    print(response.text)
+        print("BURDAN MI?")
+    if response.status_code != 401:
+            if response.json()["statusCode"] == 2000:
+                    print("Kayitli Kart")
+                        print(response.text)
+            if response.json()["inOut"] == "giris":
+                print("Kullanici giris yapiyor")
+                change_personel_card_status_cikis(cursor, code)
+                unlock_door_in(1)
+            elif response.json()["inOut"] == "cikis":
+                print("ziyaretci cikis yapiyor")
+                change_personel_card_status_giris(cursor, code)
+                unlock_door_out(1)
+                elif response.json()["statusCode"] == 2001:
+            print("Kayitli olmayan kart")
+            pass
+        else:
+                    print(response.text)
+                        print("401  hatasi")
+            pass
+
+def control_personel_id(cursor, code):
+    cursor.execute('SELECT EXISTS(SELECT * FROM personel_card_information WHERE personel_identity_number= ? )',(code,))
+        data = cursor.fetchall()
+        print(data)
+        print(data[0][0])
+        if data[0][0] == 1:
+        return True
+    else:
+        return False
+
+def control_offline_visitor(cursor, code):
+    cursor.execute('SELECT EXISTS(SELECT * FROM offline_visitor_card  WHERE visitor_card_number= ? )',(code,))
+    data = cursor.fetchall()
+        print(data)
+        print(data[0][0])
+        if data[0][0] == 1:
+                return True
+        else:
+                return False
+def check_internet():
+        try:
+                res = socket.getaddrinfo("google.com",80)
+                return True
+        except:
+                return False
+
+def check_personel_in_out(cursor, code):
+    cursor.execute('SELECT card_status FROM personel_card_information WHERE personel_identity_number= ? ',(code,))
+        data = cursor.fetchall()
+        print(data[0][0])
+        if data[0][0] == "giris":
+        print("Personel Giris")
+            cursor.execute('UPDATE personel_card_information set card_status = "cikis" WHERE personel_identity_number= ? ',(code,))
+                cursor.execute('INSERT INTO logs (card_tag_number, card_status, date, company_id, turnstile_id) VALUES ( ? , "giris",?,"2060", "1")',(code,datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            unlock_door_in(1)
+    elif data[0][0] == "cikis":
+        print("Personel cikis")
+        cursor.execute('UPDATE personel_card_information set card_status = "giris" WHERE personel_identity_number= ? ',(code,))
+                cursor.execute('INSERT INTO logs (card_tag_number, card_status, date, company_id, turnstile_id) VALUES (?, "cikis",?, "2060", "1")',(code,datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                unlock_door_out(1)
+
+def check_offline_visitor_in_out(cursor, code):
+    cursor.execute('SELECT card_status FROM offline_visitor_card WHERE visitor_card_number= ? ',(code,))
+        data = cursor.fetchall()
+        print(data[0][0])
+        if data[0][0] == "giris":
+                print("Offline ziyaretci Giris")
+                cursor.execute('UPDATE offline_visitor_card set card_status = "cikis" WHERE visitor_card_number= ? ',(code,))
+                cursor.execute('INSERT INTO logs (card_tag_number, card_status, date, company_id, turnstile_id) VALUES ( ? , "giris",?,"2060", "1")',(code,datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+
+                unlock_door_in(1)
+        elif data[0][0] == "cikis":
+                print("Offline ziyaretci cikis")
+                cursor.execute('UPDATE offline_visitor_card set card_status = "giris" WHERE visitor_card_number= ? ',(code,))
+                cursor.execute('INSERT INTO logs (card_tag_number, card_status, date, company_id, turnstile_id) VALUES (?, "cikis",?,"2060", "1")',(code,datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+
+                unlock_door_out(1)
+
+
+def change_personel_card_status_giris(cursor, code):
+    cursor.execute('UPDATE personel_card_information set card_status = "giris" WHERE personel_identity_number= ? ',(code,))
+
+def change_personel_card_status_cikis(cursor,code):
+    cursor.execute('UPDATE personel_card_information set card_status = "cikis" WHERE personel_identity_number= ? ',(code,))
+
+def control_barcode(code):
+    print(len(str(code)))
+        if len(str(code)) == 11:
+            print("T.C kimlik karti okutuldu.")
+                print(code)
+        return code
+                #send_request(code)
+    elif len(str(code)) == 17:
+                code = str(code)
+                code = code[:11]
+                print(code)
+                return code
+        #send_request(code)
+    elif len(str(code)) == 19:
+        code = str(code)
+        code = filter(str.isdigit, code)
+        print(code)
+        return code
+        elif len(str(code)) == 14:
+                code = str(code)
+                code = filter(str.isdigit,code)
+                print(code)
+                return code
+        #send_request(code)
+        elif len(str(code)) > 17:
+                code = str(code)
+                code = filter(str.isdigit,code)
+                code = code[:11]
+            return code
+        #send_request(code[:11]
+    else:
+        return ""
+
+def send_logs(cursor):
+    cursor.execute("SELECT * from logs")
+    
+
+    rows = cursor.fetchall()
+        data2 = {"data":rows}
+
+    response = requests.post("https://pixpass.pixselect.com.tr:3434/api/v1//offline_turnstile_log", data=data2)
+    print(response.text)
+    print("Log basarili")
+    print((rows))
+    if response.json()["statusCode"] == 2000:
+        return True
+    else:
+        return False
+
+def remove_logs(cursor):
+    cursor.execute("DELETE from logs")
+
+dbconnect = sqlite3.connect("/home/pi/PIXFace-PIXPassbyID-MiniServer/pass_by_id_offline.db")
+dbconnect.text_factory = str
+dbconnect.row_factory = sqlite3.Row
+cursor = dbconnect.cursor()
+
+
+code = ""
+while True:
+    try:
+        code = raw_input("Barkodu okut")
+    except:
+        pass
+    code = control_barcode(code)
+    if  check_internet() is True:
+        #try:
+        cursor.execute("SELECT COUNT(*) FROM logs")
+        data = cursor.fetchall()
+        print(data[0][0])
+        print("EHEHEHE")
+        if data[0][0] > 0:
+            api_response = send_logs(cursor)
+            if api_response is True:
+                remove_logs(cursor)
+        send_request(code, cursor)
+        #except:
+        #    print("Request problem")
+
+    else:
+        print("Burdayimmmmm") 
+        if control_personel_id(cursor, code) is True:
+            check_personel_in_out(cursor, code)
+        elif control_offline_visitor(cursor, code) is True:
+            check_offline_visitor_in_out(cursor, code)
+        else:
+            print("Kayitli Personel degil")
+            continue
+
+    code = ""
+    dbconnect.commit()
